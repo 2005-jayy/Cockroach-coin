@@ -16,6 +16,7 @@ import {
   FaTrophy,
   FaUsers,
 } from 'react-icons/fa';
+import { useAdsgram } from './hooks/useAdsgram';
 import {
   buildings,
   dailyRewards,
@@ -27,6 +28,8 @@ import {
 
 const STORAGE_KEY = 'cockroach-coin-save-v1';
 const MAX_OFFLINE_HOURS = 8;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
+const ADSGRAM_BLOCK_ID = process.env.REACT_APP_ADSGRAM_BLOCK_ID || '';
 
 const defaultState = {
   coins: 1250,
@@ -130,6 +133,26 @@ function createPopup(text, type = 'coin') {
   };
 }
 
+function getInitData() {
+  return window.Telegram?.WebApp?.initData || '';
+}
+
+function getRankedLeaderboard(baseLeaderboard, player, state) {
+  const currentPlayerEntry = {
+    name: player.username || 'You',
+    title: `Level ${state.level} Meme CEO`,
+    coins: state.coins,
+    currentPlayer: true,
+  };
+
+  const entries = [
+    ...baseLeaderboard.filter((entry) => !entry.currentPlayer && entry.name !== currentPlayerEntry.name),
+    currentPlayerEntry,
+  ].sort((a, b) => b.coins - a.coins);
+
+  return entries.map((entry, index) => ({ ...entry, rank: index + 1 }));
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [state, setState] = useState(readSavedState);
@@ -139,11 +162,22 @@ function App() {
   const [offlineReward, setOfflineReward] = useState(null);
   const [toast, setToast] = useState('WhatsApp uncles are quietly accumulating.');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [leaderboardEntries, setLeaderboardEntries] = useState(leaderboard);
   const comboTimer = useRef(null);
 
   const multipliers = useMemo(() => getMultipliers(state), [state]);
   const profitPerHour = useMemo(() => getProfitPerHour(state) * activeEvent.multiplier, [activeEvent.multiplier, state]);
   const tapValue = Math.round(state.tapPower * multipliers.tap * (1 + Math.min(state.combo, 40) / 20) * activeEvent.tapBoost);
+  const rankedLeaderboard = useMemo(() => getRankedLeaderboard(leaderboardEntries, player, state), [leaderboardEntries, player, state]);
+  const showRewardAd = useAdsgram({
+    blockId: ADSGRAM_BLOCK_ID,
+    onReward: grantAdReward,
+    onError: (result) => {
+      const message = result?.description || 'Ad unavailable right now';
+      setToast(`${message}. Demo reward granted while ads are not configured.`);
+      grantAdReward();
+    },
+  });
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -198,10 +232,50 @@ function App() {
     return () => clearTimeout(timeout);
   }, [toast]);
 
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadLeaderboard() {
+      if (!API_BASE_URL) {
+        setLeaderboardEntries(leaderboard);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/leaderboard`, {
+          headers: { 'x-telegram-init-data': getInitData() },
+        });
+        if (!response.ok) throw new Error('Leaderboard request failed');
+        const data = await response.json();
+        if (!ignore) setLeaderboardEntries(data.leaderboard || leaderboard);
+      } catch (error) {
+        if (!ignore) setLeaderboardEntries(leaderboard);
+      }
+    }
+
+    loadLeaderboard();
+    const interval = setInterval(loadLeaderboard, 20000);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   function addPopup(text, type) {
     const popup = createPopup(text, type);
     setPopups((items) => [...items.slice(-12), popup]);
     setTimeout(() => setPopups((items) => items.filter((item) => item.id !== popup.id)), 950);
+  }
+
+  function grantAdReward() {
+    const bonusCoins = Math.max(250, Math.floor(profitPerHour / 2));
+    setState((current) => ({
+      ...current,
+      gems: current.gems + 3,
+      coins: current.coins + bonusCoins,
+    }));
+    addPopup(`+${compactNumber(bonusCoins)}`, 'coin');
+    setToast('Reward ad complete: +3 gems and emergency liquidity added.');
   }
 
   function vibrate(pattern = 'light') {
@@ -354,13 +428,17 @@ function App() {
             <MineScreen key="mine" state={state} profitPerHour={profitPerHour} onBuyBuilding={buyBuilding} onResearch={runResearch} />
           )}
           {activeTab === 'friends' && (
-            <FriendsScreen key="friends" player={player} state={state} multiplier={multipliers.referral} onShare={shareEmpire} />
+            <FriendsScreen
+              key="friends"
+              player={player}
+              state={state}
+              multiplier={multipliers.referral}
+              entries={rankedLeaderboard}
+              onShare={shareEmpire}
+            />
           )}
           {activeTab === 'events' && (
-            <EventsScreen key="events" activeEvent={activeEvent} onWatchAd={() => {
-              setState((current) => ({ ...current, gems: current.gems + 3, coins: current.coins + profitPerHour / 2 }));
-              setToast('Reward ad simulated: treasury injected with emergency liquidity.');
-            }} />
+            <EventsScreen key="events" activeEvent={activeEvent} adsReady={Boolean(ADSGRAM_BLOCK_ID)} onWatchAd={showRewardAd} />
           )}
         </AnimatePresence>
 
@@ -518,6 +596,12 @@ function HomeScreen({ state, activeEvent, tapValue, profitPerHour, popups, onTap
 }
 
 function CockroachMascot({ combo }) {
+  const legPairs = [
+    ['left-[49px] top-[85px] w-24 -rotate-[22deg]', 'right-[49px] top-[85px] w-24 rotate-[22deg]'],
+    ['left-[35px] top-[126px] w-[104px] -rotate-[6deg]', 'right-[35px] top-[126px] w-[104px] rotate-[6deg]'],
+    ['left-[47px] top-[169px] w-24 -rotate-[31deg]', 'right-[47px] top-[169px] w-24 rotate-[31deg]'],
+  ];
+
   return (
     <motion.div
       className="relative h-64 w-64"
@@ -525,38 +609,37 @@ function CockroachMascot({ combo }) {
       transition={{ repeat: Infinity, duration: combo > 12 ? 0.42 : 1.8 }}
       whileTap={{ scale: 0.92 }}
     >
-      <div className="absolute inset-6 rounded-full bg-lime-300/20 blur-3xl" />
-      <div className="roach-antenna absolute left-[83px] top-1 h-20 w-1 origin-bottom -rotate-[38deg] rounded-full bg-gradient-to-t from-yellow-900 to-yellow-300" />
-      <div className="roach-antenna roach-antenna-right absolute right-[83px] top-1 h-20 w-1 origin-bottom rotate-[38deg] rounded-full bg-gradient-to-t from-yellow-900 to-yellow-300" />
-      <div className="absolute left-[45px] top-[74px] h-2 w-20 -rotate-[21deg] rounded-full bg-[#2a1609]" />
-      <div className="absolute right-[45px] top-[74px] h-2 w-20 rotate-[21deg] rounded-full bg-[#2a1609]" />
-      <div className="roach-leg absolute left-[38px] top-[118px] h-2 w-24 -rotate-[8deg] rounded-full bg-[#2a1609]" />
-      <div className="roach-leg roach-leg-delay absolute right-[38px] top-[118px] h-2 w-24 rotate-[8deg] rounded-full bg-[#2a1609]" />
-      <div className="roach-leg roach-leg-delay absolute left-[50px] top-[170px] h-2 w-[88px] -rotate-[28deg] rounded-full bg-[#2a1609]" />
-      <div className="roach-leg absolute right-[50px] top-[170px] h-2 w-[88px] rotate-[28deg] rounded-full bg-[#2a1609]" />
-      <div className="absolute left-1/2 top-5 h-52 w-[136px] -translate-x-1/2 rounded-[50%_50%_44%_44%] border-4 border-yellow-900/80 bg-gradient-to-b from-[#a96b24] via-[#573015] to-[#16100b] shadow-[0_0_55px_rgba(57,255,20,.42)]" />
-      <div className="absolute left-1/2 top-12 h-40 w-[3px] -translate-x-1/2 rounded-full bg-yellow-950/70" />
-      <div className="absolute left-1/2 top-[78px] h-[3px] w-28 -translate-x-1/2 rounded-full bg-yellow-950/65" />
-      <div className="absolute left-1/2 top-[112px] h-[3px] w-[120px] -translate-x-1/2 rounded-full bg-yellow-950/55" />
-      <div className="absolute left-1/2 top-[148px] h-[3px] w-28 -translate-x-1/2 rounded-full bg-yellow-950/50" />
-      <div className="absolute left-[82px] top-16 h-28 w-12 -rotate-6 rounded-[50%] border border-yellow-700/30 bg-gradient-to-b from-yellow-500/20 to-black/10" />
-      <div className="absolute right-[82px] top-16 h-28 w-12 rotate-6 rounded-[50%] border border-yellow-700/30 bg-gradient-to-b from-yellow-500/20 to-black/10" />
-      <div className="absolute left-1/2 top-[92px] h-[86px] w-[168px] -translate-x-1/2 rounded-[32px] bg-gradient-to-b from-emerald-900 to-black shadow-inner">
-        <div className="absolute left-7 top-5 h-8 w-10 -skew-x-6 rounded-b-xl rounded-t-sm bg-black shadow-[0_0_16px_rgba(57,255,20,.7)]">
-          <div className="h-2 rounded-full bg-lime-300" />
-        </div>
-        <div className="absolute right-7 top-5 h-8 w-10 skew-x-6 rounded-b-xl rounded-t-sm bg-black shadow-[0_0_16px_rgba(57,255,20,.7)]">
-          <div className="h-2 rounded-full bg-lime-300" />
-        </div>
-        <div className="absolute left-1/2 top-16 h-2 w-16 -translate-x-1/2 rounded-full bg-yellow-200" />
+      <div className="absolute inset-5 rounded-full bg-lime-300/20 blur-3xl" />
+      <div className="roach-antenna absolute left-[93px] top-1 h-24 w-1 origin-bottom -rotate-[34deg] rounded-full bg-gradient-to-t from-[#2b1306] via-[#8a4f1e] to-[#e7b45c]" />
+      <div className="roach-antenna roach-antenna-right absolute right-[93px] top-1 h-24 w-1 origin-bottom rotate-[34deg] rounded-full bg-gradient-to-t from-[#2b1306] via-[#8a4f1e] to-[#e7b45c]" />
+      <div className="absolute left-1/2 top-9 h-24 w-[104px] -translate-x-1/2 rounded-[48%_48%_42%_42%] border border-[#2a1207] bg-[radial-gradient(circle_at_50%_20%,#d89a44,#5b2b12_58%,#160b05)] shadow-[inset_0_-14px_24px_rgba(0,0,0,.46)]" />
+      <div className="absolute left-[101px] top-[62px] h-4 w-5 rounded-full bg-[#090604] shadow-[0_0_8px_rgba(255,215,0,.25)]" />
+      <div className="absolute right-[101px] top-[62px] h-4 w-5 rounded-full bg-[#090604] shadow-[0_0_8px_rgba(255,215,0,.25)]" />
+
+      {legPairs.map(([leftClass, rightClass], index) => (
+        <React.Fragment key={leftClass}>
+          <div className={`roach-leg absolute h-2 origin-right rounded-full bg-gradient-to-l from-[#120905] to-[#6e3918] ${index === 1 ? 'roach-leg-delay' : ''} ${leftClass}`} />
+          <div className={`roach-leg absolute h-2 origin-left rounded-full bg-gradient-to-r from-[#120905] to-[#6e3918] ${index !== 1 ? 'roach-leg-delay' : ''} ${rightClass}`} />
+        </React.Fragment>
+      ))}
+
+      <div className="absolute left-1/2 top-[64px] h-[166px] w-[132px] -translate-x-1/2 rounded-[50%_50%_42%_42%] border-2 border-[#2a1207] bg-[linear-gradient(90deg,#2b1408_0%,#9f6128_14%,#5c2c13_50%,#9f6128_86%,#241006_100%)] shadow-[0_0_55px_rgba(57,255,20,.34),inset_0_-32px_28px_rgba(0,0,0,.48)]" />
+      <div className="absolute left-1/2 top-[72px] h-[150px] w-[2px] -translate-x-1/2 rounded-full bg-[#1b0c05]/80" />
+      {[91, 112, 135, 158, 181, 202].map((top, index) => (
+        <div
+          key={top}
+          className="absolute left-1/2 h-[3px] -translate-x-1/2 rounded-full bg-[#251006]/65"
+          style={{ top, width: `${116 - Math.abs(index - 2) * 8}px` }}
+        />
+      ))}
+      <div className="absolute left-[81px] top-[78px] h-[128px] w-12 -rotate-6 rounded-[60%_34%_46%_40%] border border-[#e0a64b]/25 bg-gradient-to-b from-[#f1c16a]/24 via-[#6d3518]/18 to-transparent" />
+      <div className="absolute right-[81px] top-[78px] h-[128px] w-12 rotate-6 rounded-[34%_60%_40%_46%] border border-[#e0a64b]/25 bg-gradient-to-b from-[#f1c16a]/24 via-[#6d3518]/18 to-transparent" />
+      <div className="absolute left-1/2 top-[214px] h-10 w-[86px] -translate-x-1/2 rounded-b-[40px] bg-gradient-to-b from-[#46200d] to-[#0d0704]" />
+      <div className="absolute left-[105px] top-[229px] h-8 w-1 -rotate-[28deg] rounded-full bg-[#6e3918]" />
+      <div className="absolute right-[105px] top-[229px] h-8 w-1 rotate-[28deg] rounded-full bg-[#6e3918]" />
+      <div className="absolute left-1/2 top-[142px] grid h-12 w-12 -translate-x-1/2 place-items-center rounded-full border-4 border-yellow-300 bg-black text-xs font-black text-yellow-200 shadow-[0_0_18px_rgba(255,215,0,.48)]">
+        CC
       </div>
-      <div className="absolute left-1/2 top-[142px] h-16 w-[120px] -translate-x-1/2 rounded-b-[34px] rounded-t-xl bg-gradient-to-b from-lime-700 to-emerald-950">
-        <div className="absolute left-1/2 top-3 h-10 w-10 -translate-x-1/2 rounded-full border-4 border-yellow-300 bg-black text-center text-xs font-black leading-8 text-yellow-200">
-          CC
-        </div>
-      </div>
-      <div className="absolute left-[104px] top-[178px] h-14 w-2 -rotate-12 rounded-full bg-yellow-300 shadow-[0_0_18px_rgba(255,215,0,.7)]" />
-      <div className="absolute right-[104px] top-[178px] h-14 w-2 rotate-12 rounded-full bg-yellow-300 shadow-[0_0_18px_rgba(255,215,0,.7)]" />
     </motion.div>
   );
 }
@@ -679,7 +762,9 @@ function MineScreen({ state, profitPerHour, onBuyBuilding, onResearch }) {
   );
 }
 
-function FriendsScreen({ player, state, multiplier, onShare }) {
+function FriendsScreen({ player, state, multiplier, entries, onShare }) {
+  const playerRank = entries.find((entry) => entry.currentPlayer)?.rank || '?';
+
   return (
     <Screen>
       <SectionTitle icon={FaUsers} title="Telegram Army" subtitle="Invite degens, unlock gems, climb referral boards." />
@@ -695,13 +780,16 @@ function FriendsScreen({ player, state, multiplier, onShare }) {
       <div className="mt-4 grid grid-cols-3 gap-3">
         <MiniStat label="Invites" value={state.referrals} />
         <MiniStat label="Boost" value={`${multiplier.toFixed(1)}x`} />
-        <MiniStat label="Next" value="25" />
+        <MiniStat label="Rank" value={`#${playerRank}`} />
       </div>
       <SectionTitle icon={FaTrophy} title="Leaderboard" subtitle="Live whale rankings." compact />
       <div className="space-y-2">
-        {leaderboard.map((entry, index) => (
-          <div key={entry.name} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[.045] p-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-yellow-300/15 text-sm font-black text-yellow-200">#{index + 1}</div>
+        {entries.slice(0, 8).map((entry) => (
+          <div
+            key={`${entry.name}-${entry.rank}`}
+            className={`flex items-center gap-3 rounded-2xl border p-3 ${entry.currentPlayer ? 'border-lime-300/35 bg-lime-300/[.10]' : 'border-white/10 bg-white/[.045]'}`}
+          >
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-yellow-300/15 text-sm font-black text-yellow-200">#{entry.rank}</div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-black text-white">{entry.name}</p>
               <p className="text-xs text-zinc-500">{entry.title}</p>
@@ -714,7 +802,7 @@ function FriendsScreen({ player, state, multiplier, onShare }) {
   );
 }
 
-function EventsScreen({ activeEvent, onWatchAd }) {
+function EventsScreen({ activeEvent, adsReady, onWatchAd }) {
   return (
     <Screen>
       <SectionTitle icon={FaBolt} title="Crash Control" subtitle="Dynamic events, monetization boosts, and siren moments." />
@@ -737,7 +825,7 @@ function EventsScreen({ activeEvent, onWatchAd }) {
         </div>
       </div>
       <button className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/30 bg-lime-300 text-sm font-black text-black" onClick={onWatchAd}>
-        <FaGift /> Watch Reward Ad
+        <FaGift /> {adsReady ? 'Watch Reward Ad' : 'Test Reward Ad'}
       </button>
     </Screen>
   );

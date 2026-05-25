@@ -104,6 +104,45 @@ app.get('/api/session', auth, async (req, res) => {
   res.json({ user: nextUser, offlineReward: reward, profitPerHour: getProfitPerHour(nextUser) });
 });
 
+app.get('/api/leaderboard', auth, async (req, res) => {
+  const user = await getUser(req.telegramUser);
+  const topUsers = await users
+    .find(
+      {},
+      {
+        projection: {
+          _id: 0,
+          telegramId: 1,
+          username: 1,
+          coins: 1,
+          level: 1,
+          stats: 1,
+        },
+      },
+    )
+    .sort({ coins: -1, updatedAt: -1 })
+    .limit(50)
+    .toArray();
+  const betterPlayers = await users.countDocuments({ coins: { $gt: user.coins } });
+  const leaderboard = topUsers.map((entry) => ({
+    name: entry.username || 'CockroachCEO',
+    title: entry.telegramId === user.telegramId ? 'Your live colony' : `Level ${entry.level || 1} Meme CEO`,
+    coins: Math.floor(entry.coins || 0),
+    currentPlayer: entry.telegramId === user.telegramId,
+  }));
+
+  if (!leaderboard.some((entry) => entry.currentPlayer)) {
+    leaderboard.push({
+      name: user.username || 'CockroachCEO',
+      title: 'Your live colony',
+      coins: Math.floor(user.coins || 0),
+      currentPlayer: true,
+    });
+  }
+
+  res.json({ leaderboard, playerRank: betterPlayers + 1 });
+});
+
 app.post('/api/tap', auth, async (req, res) => {
   const user = await getUser(req.telegramUser);
   const comboKey = `combo:${user.telegramId}`;
