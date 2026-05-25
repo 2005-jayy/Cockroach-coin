@@ -5,6 +5,7 @@ import {
   FaChartLine,
   FaCoins,
   FaCrown,
+  FaExchangeAlt,
   FaFlask,
   FaGem,
   FaGift,
@@ -425,6 +426,7 @@ function App() {
     { id: 'home', label: 'Home', icon: FaHome },
     { id: 'market', label: 'Market', icon: FaStore },
     { id: 'mine', label: 'Mine', icon: FaMicrochip },
+    { id: 'wallet', label: 'Wallet', icon: FaExchangeAlt },
     { id: 'friends', label: 'Friends', icon: FaUsers },
     { id: 'events', label: 'Events', icon: FaBolt },
   ];
@@ -466,6 +468,9 @@ function App() {
           )}
           {activeTab === 'mine' && (
             <MineScreen key="mine" state={state} profitPerHour={profitPerHour} onBuyBuilding={buyBuilding} onResearch={runResearch} />
+          )}
+          {activeTab === 'wallet' && (
+            <WalletScreen key="wallet" state={state} />
           )}
           {activeTab === 'friends' && (
             <FriendsScreen
@@ -887,6 +892,48 @@ function EventsScreen({ activeEvent, adsReady, adsConfigured, onWatchAd }) {
   );
 }
 
+function WalletScreen({ state }) {
+  const estimatedToken = state.gems / 100;
+
+  return (
+    <Screen>
+      <SectionTitle icon={FaExchangeAlt} title="Crypto Wallet" subtitle="Gem-to-token conversion is being prepared for launch." />
+      <div className="rounded-3xl border border-yellow-300/25 bg-yellow-300/10 p-5 shadow-[0_0_34px_rgba(255,216,77,.12)]">
+        <p className="text-[10px] font-black uppercase tracking-[.28em] text-yellow-200">Coming Soon</p>
+        <h2 className="mt-3 text-2xl font-black text-white">$ROACH Converter</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-300">
+          Gems earned from reward ads will become the premium bridge into Cockroach Coin token rewards after wallet verification goes live.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <MiniStat label="Your gems" value={compactNumber(state.gems)} />
+          <MiniStat label="Est. $ROACH" value={estimatedToken.toFixed(2)} />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.07] p-4">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-lime-300 text-black">
+            <FaGem />
+          </div>
+          <div>
+            <h3 className="text-sm font-black text-white">Save gems from ads</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              Reward ads give gems now. When conversion opens, gems will be used for token claims, boost passes, and limited colony skins.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900/80 text-sm font-black text-zinc-500"
+        disabled
+      >
+        <FaExchangeAlt /> Conversion Opens Soon
+      </button>
+    </Screen>
+  );
+}
+
 function SectionTitle({ icon: Icon, title, subtitle, compact = false }) {
   return (
     <div className={compact ? 'mb-3 mt-6' : 'mb-4'}>
@@ -902,7 +949,7 @@ function SectionTitle({ icon: Icon, title, subtitle, compact = false }) {
 function BottomNav({ tabs, activeTab, onChange }) {
   return (
     <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-md -translate-x-1/2 border-t border-lime-300/10 bg-black/[.80] px-3 pb-3 pt-2 backdrop-blur-xl">
-      <div className="grid grid-cols-5 gap-1">
+      <div className="grid grid-cols-6 gap-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
