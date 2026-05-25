@@ -1,19 +1,16 @@
-const { Telegraf } = require('telegraf');
+const { Markup, Telegraf } = require('telegraf');
 const { message } = require('telegraf/filters');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-bot.command('start', (ctx) => {
-  const appUrl = process.env.WEB_APP_URL || 'https://cockroach-coin.vercel.app/';
-  ctx.reply('Cockroach Coin is live. Build the only meme empire that survives every crash.', {
-    reply_markup: {
-      keyboard: [
-        [{ text: 'Open Cockroach Coin', web_app: { url: appUrl } }]
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: false
-    }
-  });
+bot.start((ctx) => {
+  const appUrl = process.env.WEB_APP_URL || 'https://cockroachcoin.netlify.app';
+  ctx.reply(
+    'Welcome to Cockroach Coin!',
+    Markup.inlineKeyboard([
+      Markup.button.webApp('Launch Game', appUrl),
+    ]),
+  );
 });
 
 bot.on(message('web_app_data'), async (ctx) => {
@@ -22,6 +19,8 @@ bot.on(message('web_app_data'), async (ctx) => {
 });
 
 bot.launch();
+
+console.log('Bot running...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

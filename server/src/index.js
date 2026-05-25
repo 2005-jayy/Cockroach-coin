@@ -91,6 +91,37 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, name: 'cockroach-coin-api' });
 });
 
+app.post('/login', async (req, res) => {
+  const { telegramId, username } = req.body;
+
+  if (!telegramId) {
+    res.status(400).json({ error: 'telegramId is required' });
+    return;
+  }
+
+  const now = new Date();
+  const user = await users.findOneAndUpdate(
+    { telegramId: String(telegramId) },
+    {
+      $setOnInsert: {
+        ...defaultUser({ id: telegramId, username }),
+        coins: 1000,
+        createdAt: now,
+      },
+      $set: {
+        username: username || 'CockroachCEO',
+        updatedAt: now,
+      },
+    },
+    {
+      upsert: true,
+      returnDocument: 'after',
+    },
+  );
+
+  res.json(user);
+});
+
 app.get('/api/session', auth, async (req, res) => {
   const user = await getUser(req.telegramUser);
   const reward = calculateOfflineReward(user);

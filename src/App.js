@@ -67,6 +67,7 @@ function getLocalDateKey(date = new Date()) {
 function getTelegramUser() {
   const tg = window.Telegram?.WebApp;
   const user = tg?.initDataUnsafe?.user;
+  if (user) console.log(user);
   return {
     id: user?.id || 'demo-ceo',
     username: user?.username || user?.first_name || 'DelhiDegen',
@@ -145,6 +146,22 @@ function getInitData() {
   return window.Telegram?.WebApp?.initData || '';
 }
 
+async function loginTelegramUser(user) {
+  if (!API_BASE_URL || !user?.id) return null;
+
+  const response = await fetch(`${API_BASE_URL}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      telegramId: user.id,
+      username: user.username || user.first_name || 'CockroachCEO',
+    }),
+  });
+
+  if (!response.ok) throw new Error('Login request failed');
+  return response.json();
+}
+
 function getRankedLeaderboard(baseLeaderboard, player, state) {
   const currentPlayerEntry = {
     name: player.username || 'You',
@@ -193,7 +210,12 @@ function App() {
     tg?.expand?.();
     tg?.setHeaderColor?.('#050807');
     tg?.setBackgroundColor?.('#050807');
+    const telegramUser = tg?.initDataUnsafe?.user;
     setPlayer(getTelegramUser());
+
+    loginTelegramUser(telegramUser).catch(() => {
+      setToast('Telegram login sync failed. Local save is still active.');
+    });
   }, []);
 
   useEffect(() => {
