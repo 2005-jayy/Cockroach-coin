@@ -15,6 +15,17 @@ export function useMonetagRewardAd({ zoneId, sdkSrc, userId, onReward, onError }
       return undefined;
     }
 
+    const pollForSdk = () => {
+      const interval = setInterval(() => {
+        if (getExistingSdk(zoneId)) {
+          setLoaded(true);
+          clearInterval(interval);
+        }
+      }, 500);
+
+      return () => clearInterval(interval);
+    };
+
     if (getExistingSdk(zoneId)) {
       setLoaded(true);
       return undefined;
@@ -22,13 +33,13 @@ export function useMonetagRewardAd({ zoneId, sdkSrc, userId, onReward, onError }
 
     if (!sdkSrc) {
       setLoaded(false);
-      return undefined;
+      return pollForSdk();
     }
 
     const existingScript = document.querySelector(`script[data-sdk="${sdkName}"]`);
     if (existingScript) {
       existingScript.addEventListener('load', () => setLoaded(Boolean(getExistingSdk(zoneId))), { once: true });
-      return undefined;
+      return pollForSdk();
     }
 
     const script = document.createElement('script');
@@ -43,7 +54,7 @@ export function useMonetagRewardAd({ zoneId, sdkSrc, userId, onReward, onError }
     };
     document.head.appendChild(script);
 
-    return undefined;
+    return pollForSdk();
   }, [onError, sdkName, sdkSrc, zoneId]);
 
   const showAd = useCallback(async () => {
