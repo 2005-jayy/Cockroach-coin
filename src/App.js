@@ -42,6 +42,7 @@ const defaultState = {
   tapPower: 12,
   referrals: 3,
   streakDay: 4,
+  lastDailyClaimDate: '',
   lastSeen: Date.now(),
   premium: false,
   buildings: Object.fromEntries(buildings.map((building) => [building.id, building.startLevel])),
@@ -54,6 +55,13 @@ function compactNumber(value) {
     notation: value >= 100000 ? 'compact' : 'standard',
     maximumFractionDigits: value >= 100000 ? 1 : 0,
   }).format(Math.floor(value));
+}
+
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getTelegramUser() {
@@ -358,6 +366,12 @@ function App() {
   }
 
   function claimDailyReward(day) {
+    const today = getLocalDateKey();
+    if (state.lastDailyClaimDate === today) {
+      setToast('Daily reward already claimed. Come back tomorrow.');
+      return;
+    }
+
     const reward = dailyRewards[day - 1];
     setState((current) => ({
       ...current,
@@ -365,6 +379,7 @@ function App() {
       gems: current.gems + reward.gems,
       mutationPoints: current.mutationPoints + reward.mutationPoints,
       streakDay: Math.min(7, day + 1),
+      lastDailyClaimDate: today,
     }));
     setToast(day === 7 ? 'Legendary mutation chest opened.' : 'Daily reward claimed.');
   }
@@ -419,6 +434,7 @@ function App() {
               onTap={handleTap}
               onShare={shareEmpire}
               onClaimDaily={claimDailyReward}
+              dailyClaimed={state.lastDailyClaimDate === getLocalDateKey()}
             />
           )}
           {activeTab === 'market' && (
@@ -539,7 +555,7 @@ function Screen({ children }) {
   );
 }
 
-function HomeScreen({ state, activeEvent, tapValue, profitPerHour, popups, onTap, onShare, onClaimDaily }) {
+function HomeScreen({ state, activeEvent, tapValue, profitPerHour, popups, onTap, onShare, onClaimDaily, dailyClaimed }) {
   return (
     <Screen>
       <div className="mb-3 flex items-center justify-between rounded-2xl border border-red-300/25 bg-red-500/10 px-3 py-2 shadow-[0_0_24px_rgba(239,68,68,.16)]">
@@ -576,7 +592,12 @@ function HomeScreen({ state, activeEvent, tapValue, profitPerHour, popups, onTap
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
-        <ActionButton icon={FaGift} label={`Day ${state.streakDay} Reward`} onClick={() => onClaimDaily(state.streakDay)} />
+        <ActionButton
+          icon={FaGift}
+          label={dailyClaimed ? 'Reward Claimed' : `Day ${state.streakDay} Reward`}
+          onClick={() => onClaimDaily(state.streakDay)}
+          disabled={dailyClaimed}
+        />
         <ActionButton icon={FaShareAlt} label="Share Empire" onClick={onShare} />
       </div>
 
@@ -644,11 +665,12 @@ function CockroachMascot({ combo }) {
   );
 }
 
-function ActionButton({ icon: Icon, label, onClick }) {
+function ActionButton({ icon: Icon, label, onClick, disabled = false }) {
   return (
     <motion.button
-      className="flex h-14 items-center justify-center gap-2 rounded-2xl border border-lime-300/25 bg-lime-300/10 px-3 text-sm font-black text-lime-100 shadow-[0_0_22px_rgba(57,255,20,.12)]"
+      className={`flex h-14 items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-black shadow-[0_0_22px_rgba(57,255,20,.12)] ${disabled ? 'border-zinc-700 bg-zinc-900/70 text-zinc-500' : 'border-lime-300/25 bg-lime-300/10 text-lime-100'}`}
       onClick={onClick}
+      disabled={disabled}
       whileTap={{ scale: 0.96 }}
     >
       <Icon /> {label}
