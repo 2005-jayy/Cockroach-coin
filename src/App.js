@@ -153,11 +153,7 @@ async function loginTelegramUser(user) {
 
   const response = await fetch(`${API_BASE_URL}/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      telegramId: user.id,
-      username: user.username || user.first_name || 'CockroachCEO',
-    }),
+    headers: { 'x-telegram-init-data': getInitData() },
   });
 
   if (!response.ok) throw new Error('Login request failed');

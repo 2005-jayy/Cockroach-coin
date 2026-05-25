@@ -17,9 +17,25 @@ const port = process.env.PORT || 8080;
 const botToken = process.env.BOT_TOKEN || '';
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/cockroach-coin';
 const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const isProduction = process.env.NODE_ENV === 'production';
+const frontendOrigins = process.env.FRONTEND_ORIGIN
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
+app.enable('trust proxy');
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN?.split(',') || true }));
+app.use((req, res, next) => {
+  const forwardedProto = req.header('x-forwarded-proto');
+  if (isProduction && forwardedProto && forwardedProto !== 'https') {
+    res.redirect(308, `https://${req.header('host')}${req.originalUrl}`);
+    return;
+  }
+  next();
+});
+app.use(cors({
+  origin: frontendOrigins?.length ? frontendOrigins : !isProduction,
+}));
 app.use(express.json({ limit: '64kb' }));
 app.use(rateLimit({ windowMs: 60 * 1000, max: 180 }));
 
@@ -27,7 +43,7 @@ let users;
 let redis;
 
 function verifyTelegramInitData(initData) {
-  if (!botToken || !initData) return process.env.NODE_ENV !== 'production';
+  if (!botToken || !initData) return !isProduction;
   const params = new URLSearchParams(initData);
   const hash = params.get('hash');
   params.delete('hash');
@@ -44,6 +60,30 @@ function verifyTelegramInitData(initData) {
   return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
+function parseTelegramUser(initData) {
+  if (!initData && !isProduction) return { id: 'demo', username: 'demo' };
+
+  const params = new URLSearchParams(initData || '');
+  const rawUser = params.get('user');
+  if (!rawUser) return null;
+
+  try {
+    const user = JSON.parse(rawUser);
+    if (!user || !['number', 'string'].includes(typeof user.id)) return null;
+    return user;
+  } catch (error) {
+    return null;
+  }
+}
+
+function cleanUsername(value) {
+  return String(value || 'CockroachCEO').trim().slice(0, 32) || 'CockroachCEO';
+}
+
+function asyncHandler(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
 async function auth(req, res, next) {
   const initData = req.header('x-telegram-init-data');
   if (!verifyTelegramInitData(initData)) {
@@ -51,8 +91,12 @@ async function auth(req, res, next) {
     return;
   }
 
-  const params = new URLSearchParams(initData || '');
-  const telegramUser = JSON.parse(params.get('user') || '{"id":"demo","username":"demo"}');
+  const telegramUser = parseTelegramUser(initData);
+  if (!telegramUser) {
+    res.status(400).json({ error: 'Invalid Telegram user payload' });
+    return;
+  }
+
   req.telegramUser = telegramUser;
   next();
 }
@@ -60,7 +104,7 @@ async function auth(req, res, next) {
 function defaultUser(telegramUser) {
   return {
     telegramId: String(telegramUser.id),
-    username: telegramUser.username || telegramUser.first_name || 'CockroachCEO',
+    username: cleanUsername(telegramUser.username || telegramUser.first_name),
     coins: 1250,
     gems: 18,
     mutationPoints: 0,
@@ -91,25 +135,19 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, name: 'cockroach-coin-api' });
 });
 
-app.post('/login', async (req, res) => {
-  const { telegramId, username } = req.body;
-
-  if (!telegramId) {
-    res.status(400).json({ error: 'telegramId is required' });
-    return;
-  }
-
+app.post('/login', auth, asyncHandler(async (req, res) => {
+  const { id, username, first_name: firstName } = req.telegramUser;
   const now = new Date();
   const user = await users.findOneAndUpdate(
-    { telegramId: String(telegramId) },
+    { telegramId: String(id) },
     {
       $setOnInsert: {
-        ...defaultUser({ id: telegramId, username }),
+        ...defaultUser({ id, username, first_name: firstName }),
         coins: 1000,
         createdAt: now,
       },
       $set: {
-        username: username || 'CockroachCEO',
+        username: cleanUsername(username || firstName),
         updatedAt: now,
       },
     },
@@ -120,9 +158,9 @@ app.post('/login', async (req, res) => {
   );
 
   res.json(user);
-});
+}));
 
-app.get('/api/session', auth, async (req, res) => {
+app.get('/api/session', auth, asyncHandler(async (req, res) => {
   const user = await getUser(req.telegramUser);
   const reward = calculateOfflineReward(user);
   const nextUser = {
@@ -133,9 +171,9 @@ app.get('/api/session', auth, async (req, res) => {
   };
   await users.updateOne({ _id: new ObjectId(user._id) }, { $set: nextUser });
   res.json({ user: nextUser, offlineReward: reward, profitPerHour: getProfitPerHour(nextUser) });
-});
+}));
 
-app.get('/api/leaderboard', auth, async (req, res) => {
+app.get('/api/leaderboard', auth, asyncHandler(async (req, res) => {
   const user = await getUser(req.telegramUser);
   const topUsers = await users
     .find(
@@ -172,9 +210,9 @@ app.get('/api/leaderboard', auth, async (req, res) => {
   }
 
   res.json({ leaderboard, playerRank: betterPlayers + 1 });
-});
+}));
 
-app.post('/api/tap', auth, async (req, res) => {
+app.post('/api/tap', auth, asyncHandler(async (req, res) => {
   const user = await getUser(req.telegramUser);
   const comboKey = `combo:${user.telegramId}`;
   const combo = Number(await redis.get(comboKey)) || 0;
@@ -188,12 +226,25 @@ app.post('/api/tap', auth, async (req, res) => {
     },
   );
   res.json({ earned, combo: Math.min(combo + 1, 50) });
-});
+}));
 
-app.post('/api/buildings/:buildingId/upgrade', auth, async (req, res) => {
+app.post('/api/buildings/:buildingId/upgrade', auth, asyncHandler(async (req, res) => {
+  const { buildingId } = req.params;
+  if (!/^[a-z0-9-]+$/.test(buildingId)) {
+    res.status(400).json({ error: 'Invalid building id' });
+    return;
+  }
+
   const user = await getUser(req.telegramUser);
-  const currentLevel = user.buildings?.[req.params.buildingId] || 0;
-  const cost = getBuildingCost(req.params.buildingId, currentLevel);
+  const currentLevel = user.buildings?.[buildingId] || 0;
+  let cost;
+  try {
+    cost = getBuildingCost(buildingId, currentLevel);
+  } catch (error) {
+    res.status(404).json({ error: 'Unknown building' });
+    return;
+  }
+
   if (user.coins < cost) {
     res.status(409).json({ error: 'Not enough Cockroach Coin', cost });
     return;
@@ -202,11 +253,16 @@ app.post('/api/buildings/:buildingId/upgrade', auth, async (req, res) => {
   await users.updateOne(
     { _id: new ObjectId(user._id) },
     {
-      $inc: { coins: -cost, [`buildings.${req.params.buildingId}`]: 1 },
+      $inc: { coins: -cost, [`buildings.${buildingId}`]: 1 },
       $set: { lastSeenAt: new Date(), updatedAt: new Date() },
     },
   );
   res.json({ ok: true, cost, nextLevel: currentLevel + 1 });
+}));
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 async function start() {
