@@ -16,7 +16,7 @@ import {
   FaTrophy,
   FaUsers,
 } from 'react-icons/fa';
-import { useAdsgram } from './hooks/useAdsgram';
+import { useMonetagRewardAd } from './hooks/useMonetagRewardAd';
 import {
   buildings,
   dailyRewards,
@@ -29,7 +29,8 @@ import {
 const STORAGE_KEY = 'cockroach-coin-save-v1';
 const MAX_OFFLINE_HOURS = 8;
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
-const ADSGRAM_BLOCK_ID = process.env.REACT_APP_ADSGRAM_BLOCK_ID || '';
+const MONETAG_ZONE_ID = process.env.REACT_APP_MONETAG_ZONE_ID || '11056935';
+const MONETAG_SDK_SRC = process.env.REACT_APP_MONETAG_SDK_SRC || 'https://libtl.com/sdk.js';
 
 const defaultState = {
   coins: 1250,
@@ -194,13 +195,14 @@ function App() {
   const profitPerHour = useMemo(() => getProfitPerHour(state) * activeEvent.multiplier, [activeEvent.multiplier, state]);
   const tapValue = Math.round(state.tapPower * multipliers.tap * (1 + Math.min(state.combo, 40) / 20) * activeEvent.tapBoost);
   const rankedLeaderboard = useMemo(() => getRankedLeaderboard(leaderboardEntries, player, state), [leaderboardEntries, player, state]);
-  const showRewardAd = useAdsgram({
-    blockId: ADSGRAM_BLOCK_ID,
+  const rewardAd = useMonetagRewardAd({
+    zoneId: MONETAG_ZONE_ID,
+    sdkSrc: MONETAG_SDK_SRC,
+    userId: player.id,
     onReward: grantAdReward,
-    onError: (result) => {
-      const message = result?.description || 'Ad unavailable right now';
-      setToast(`${message}. Demo reward granted while ads are not configured.`);
-      grantAdReward();
+    onError: (error) => {
+      const message = error?.message || error?.description || 'Ad unavailable right now';
+      setToast(message);
     },
   });
 
@@ -476,7 +478,13 @@ function App() {
             />
           )}
           {activeTab === 'events' && (
-            <EventsScreen key="events" activeEvent={activeEvent} adsReady={Boolean(ADSGRAM_BLOCK_ID)} onWatchAd={showRewardAd} />
+            <EventsScreen
+              key="events"
+              activeEvent={activeEvent}
+              adsReady={rewardAd.loaded}
+              adsConfigured={Boolean(MONETAG_ZONE_ID)}
+              onWatchAd={rewardAd.showAd}
+            />
           )}
         </AnimatePresence>
 
@@ -846,7 +854,7 @@ function FriendsScreen({ player, state, multiplier, entries, onShare }) {
   );
 }
 
-function EventsScreen({ activeEvent, adsReady, onWatchAd }) {
+function EventsScreen({ activeEvent, adsReady, adsConfigured, onWatchAd }) {
   return (
     <Screen>
       <SectionTitle icon={FaBolt} title="Crash Control" subtitle="Dynamic events, monetization boosts, and siren moments." />
@@ -868,8 +876,12 @@ function EventsScreen({ activeEvent, adsReady, onWatchAd }) {
           </div>
         </div>
       </div>
-      <button className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/30 bg-lime-300 text-sm font-black text-black" onClick={onWatchAd}>
-        <FaGift /> {adsReady ? 'Watch Reward Ad' : 'Test Reward Ad'}
+      <button
+        className="mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/30 bg-lime-300 text-sm font-black text-black disabled:border-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-500"
+        onClick={onWatchAd}
+        disabled={!adsConfigured}
+      >
+        <FaGift /> {adsReady ? 'Watch Reward Ad' : adsConfigured ? 'Loading Ad' : 'Add Monetag Zone ID'}
       </button>
     </Screen>
   );
